@@ -27,6 +27,39 @@ logging.basicConfig(
 logger = logging.getLogger("bot")
 
 async def main():
+    # Запуск облачного веб-сервера для Health Check (Render)
+    port_str = os.getenv("PORT", "10000")
+    web_runner = None
+    try:
+        port = int(port_str)
+        from aiohttp import web
+        app = web.Application()
+        app.router.add_get("/", lambda r: web.Response(text="Bot is running!"))
+        app.router.add_get("/health", lambda r: web.Response(text="OK"))
+        web_runner = web.AppRunner(app)
+        await web_runner.setup()
+        site = web.TCPSite(web_runner, "0.0.0.0", port)
+        await site.start()
+        logger.info(f"Health-check веб-сервер запущен на 0.0.0.0:{port}")
+
+        # Фоновый Keep-Alive пинг
+        ext_url = os.getenv("RENDER_EXTERNAL_URL")
+        if ext_url:
+            async def ping_loop():
+                import aiohttp
+                await asyncio.sleep(60)
+                async with aiohttp.ClientSession() as session:
+                    while True:
+                        try:
+                            async with session.get(ext_url, timeout=10) as resp:
+                                logger.info(f"Keep-Alive ping {ext_url}: {resp.status}")
+                        except Exception:
+                            pass
+                        await asyncio.sleep(600)
+            asyncio.create_task(ping_loop())
+    except Exception as e:
+        logger.warning(f"Веб-сервер не запущен: {e}")
+
     logger.info("Инициализация базы данных...")
     await db.init_db()
 
@@ -60,37 +93,6 @@ async def main():
             )
     except Exception as e:
         logger.warning(f"Не удалось установить команды меню: {e}")
-    
-    # Если бот запущен на облачном хостинге (Render) с переменной PORT
-    port_str = os.getenv("PORT")
-    web_runner = None
-    if port_str and port_str.isdigit():
-        port = int(port_str)
-        from aiohttp import web
-        app = web.Application()
-        app.router.add_get("/", lambda r: web.Response(text="Bot is running!"))
-        app.router.add_get("/health", lambda r: web.Response(text="OK"))
-        web_runner = web.AppRunner(app)
-        await web_runner.setup()
-        site = web.TCPSite(web_runner, "0.0.0.0", port)
-        await site.start()
-        logger.info(f"Облачный веб-сервер запущен на порту {port}")
-
-        # Фоновый Keep-Alive пинг, чтобы бесплатный сервер Render не засыпал
-        ext_url = os.getenv("RENDER_EXTERNAL_URL")
-        if ext_url:
-            async def ping_loop():
-                import aiohttp
-                await asyncio.sleep(60)
-                async with aiohttp.ClientSession() as session:
-                    while True:
-                        try:
-                            async with session.get(ext_url, timeout=10) as resp:
-                                logger.info(f"Keep-Alive ping {ext_url}: {resp.status}")
-                        except Exception:
-                            pass
-                        await asyncio.sleep(600)  # раз в 10 минут
-            asyncio.create_task(ping_loop())
     
     # Удаляем вебхуки и запускаем polling
     try:
