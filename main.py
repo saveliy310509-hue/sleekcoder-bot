@@ -61,11 +61,44 @@ async def main():
     except Exception as e:
         logger.warning(f"Не удалось установить команды меню: {e}")
     
+    # Если бот запущен на облачном хостинге (Render) с переменной PORT
+    port_str = os.getenv("PORT")
+    web_runner = None
+    if port_str and port_str.isdigit():
+        port = int(port_str)
+        from aiohttp import web
+        app = web.Application()
+        app.router.add_get("/", lambda r: web.Response(text="Bot is running!"))
+        app.router.add_get("/health", lambda r: web.Response(text="OK"))
+        web_runner = web.AppRunner(app)
+        await web_runner.setup()
+        site = web.TCPSite(web_runner, "0.0.0.0", port)
+        await site.start()
+        logger.info(f"Облачный веб-сервер запущен на порту {port}")
+
+        # Фоновый Keep-Alive пинг, чтобы бесплатный сервер Render не засыпал
+        ext_url = os.getenv("RENDER_EXTERNAL_URL")
+        if ext_url:
+            async def ping_loop():
+                import aiohttp
+                await asyncio.sleep(60)
+                async with aiohttp.ClientSession() as session:
+                    while True:
+                        try:
+                            async with session.get(ext_url, timeout=10) as resp:
+                                logger.info(f"Keep-Alive ping {ext_url}: {resp.status}")
+                        except Exception:
+                            pass
+                        await asyncio.sleep(600)  # раз в 10 минут
+            asyncio.create_task(ping_loop())
+    
     # Удаляем вебхуки и запускаем polling
     try:
         await bot.delete_webhook(drop_pending_updates=True)
         await dp.start_polling(bot)
     finally:
+        if web_runner:
+            await web_runner.cleanup()
         await bot.session.close()
         logger.info("Сессия бота закрыта.")
 
