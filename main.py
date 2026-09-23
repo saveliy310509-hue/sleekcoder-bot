@@ -37,7 +37,7 @@ from bot.database import db as files_db
 from bot.handlers import main_router as files_router
 
 # Импорт бота отзывов
-import reviews_bot.bot as reviews_bot_module
+import reviews_bot.engine as reviews_bot_module
 import reviews_bot.config as reviews_config_module
 
 BOT1_STATUS = "Starting..."
