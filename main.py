@@ -118,20 +118,22 @@ async def run_bot():
         logger.exception("Критическая ошибка в работе бота:")
 
 async def ping_loop():
-    ext_url = os.getenv("RENDER_EXTERNAL_URL")
-    if not ext_url:
-        return
-    logger.info(f"Запущен Keep-Alive для {ext_url}")
-    await asyncio.sleep(60)
+    urls = [
+        "https://sleekcoder-bot.onrender.com/health",
+        "https://sleekcodereviews-bot.onrender.com/health"
+    ]
+    logger.info("Запущен взаимный Keep-Alive для поддержания активности 24/7...")
+    await asyncio.sleep(45)
     import aiohttp
     async with aiohttp.ClientSession() as session:
         while True:
-            try:
-                async with session.get(ext_url, timeout=10) as resp:
-                    logger.info(f"Keep-Alive ping {ext_url}: {resp.status}")
-            except Exception:
-                pass
-            await asyncio.sleep(600)  # раз в 10 минут
+            for target_url in urls:
+                try:
+                    async with session.get(target_url, timeout=15) as resp:
+                        logger.info(f"Keep-Alive ping {target_url}: {resp.status}")
+                except Exception as e:
+                    logger.debug(f"Keep-Alive error {target_url}: {e}")
+            await asyncio.sleep(300)  # раз в 5 минут
 
 async def main():
     port = int(os.getenv("PORT", "10000"))
