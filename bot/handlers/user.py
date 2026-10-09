@@ -1,18 +1,21 @@
 import html
+import logging
 from aiogram import Router, Bot, types, F
 from aiogram.filters import CommandStart, CommandObject
 from bot.config import ADMIN_ID
 from bot.database import db
+from bot.keyboards.inline import user_admin_shortcut_kb
+from bot.ui import (
+    show_or_edit,
+    safe_delete_user_message,
+    safe_delete_message,
+    get_last_message_id,
+    clear_last_message_id,
+    strip_custom_emojis
+)
 
+logger = logging.getLogger("user_handlers")
 router = Router()
-
-import re
-
-def strip_custom_emojis(html_str: str) -> str:
-    """Заменяет <tg-emoji emoji-id="...">EMOJI</tg-emoji> на обычный символ эмодзи"""
-    if not html_str:
-        return ""
-    return re.sub(r'<tg-emoji[^>]*>(.*?)</tg-emoji>', r'\1', html_str)
 
 def safe_truncate_caption(text: str, max_len: int = 1024) -> str:
     """Безопасное усечение подписи до допустимого лимита Telegram (1024 символа)"""
@@ -44,7 +47,7 @@ async def send_file_by_type(bot: Bot, chat_id: int, file_id: str, file_type: str
     except Exception:
         pass
         
-    # 2. Если не удалось (например, Telegram отклонил премиум эмодзи), пробуем со снятием тегов <tg-emoji>
+    # 2. Если не удалось, пробуем без тегов <tg-emoji>
     try:
         clean_caption = safe_truncate_caption(strip_custom_emojis(caption), 1024)
         await method(**kwargs, caption=clean_caption, parse_mode="HTML")
@@ -60,16 +63,6 @@ async def send_file_by_type(bot: Bot, chat_id: int, file_id: str, file_type: str
     except Exception:
         return False
 
-async def safe_answer(message: types.Message, text: str):
-    """Безопасная отправка ответа с премиум эмодзи и фоллбэком при ошибке парсинга"""
-    try:
-        await message.answer(text, parse_mode="HTML")
-    except Exception:
-        try:
-            await message.answer(strip_custom_emojis(text), parse_mode="HTML")
-        except Exception:
-            await message.answer(strip_custom_emojis(text))
-
 async def deliver_file_by_link(message: types.Message, raw_code: str, bot: Bot) -> bool:
     """Выдача файла по коду или ссылке с подробной обработкой всех краевых случаев"""
     clean_code = (raw_code or "").strip()
@@ -80,14 +73,11 @@ async def deliver_file_by_link(message: types.Message, raw_code: str, bot: Bot) 
     if not link:
         return False
 
-    # Увеличиваем счетчик скачиваний
     clicks = await db.increment_link_clicks(link["code"])
     
-    # Получаем имя бота для формирования ссылки
     bot_info = await bot.get_me()
     deep_link = f"https://t.me/{bot_info.username}?start={link['code']}"
     
-    # Формируем подпись к файлу
     raw_caption = link["caption"] if link.get("caption") else await db.get_text(
         "file_caption_default",
         "📦 <b>{name}</b>\n📥 Скачиваний: <b>{downloads}</b>\n\nВаш файл готов к скачиванию!"
@@ -105,7 +95,6 @@ async def deliver_file_by_link(message: types.Message, raw_code: str, bot: Bot) 
         .replace("{link}", deep_link)
     )
     
-    # Отправляем файл пользователю
     sent = await send_file_by_type(
         bot=bot,
         chat_id=message.chat.id,
@@ -115,10 +104,15 @@ async def deliver_file_by_link(message: types.Message, raw_code: str, bot: Bot) 
     )
     
     if not sent:
-        await safe_answer(
-            message,
-            "⚠️ Не удалось отправить файл. Возможно, он был временно недоступен в серверах Telegram. "
-            "Попробуйте ещё раз через несколько секунд или обратитесь к администратору."
+        await show_or_edit(
+            bot=bot,
+            chat_id=message.chat.id,
+            user_id=message.from_user.id,
+            text=(
+                "⚠️ <b>Не удалось отправить файл.</b>\n"
+                "Возможно, он был временно недоступен в серверах Telegram. "
+                "Попробуйте ещё раз через несколько секунд или обратитесь к администратору."
+            )
         )
     return True
 
@@ -128,17 +122,28 @@ async def start_handler(message: types.Message, command: CommandObject, bot: Bot
     username = message.from_user.username
     first_name = message.from_user.first_name
     
-    # Сохраняем/обновляем пользователя в базе данных
+    await safe_delete_user_message(message)
     await db.add_or_update_user(user_id, username, first_name)
     
     code = (command.args or "").strip()
     
     # 1. Если переход был по ссылке (deep link)
     if code:
+        # Удаляем предыдущее информационное сообщение бота, чтобы в чате остался только выданный файл
+        prev_msg_id = get_last_message_id(user_id)
+        if prev_msg_id:
+            await safe_delete_message(bot, message.chat.id, prev_msg_id)
+            clear_last_message_id(user_id)
+
         delivered = await deliver_file_by_link(message, code, bot)
         if not delivered:
             not_found_msg = await db.get_text("link_not_found", "❌ Ссылка не найдена или устарела.")
-            await safe_answer(message, not_found_msg)
+            await show_or_edit(
+                bot=bot,
+                chat_id=message.chat.id,
+                user_id=user_id,
+                text=not_found_msg
+            )
         return
 
     # 2. Если обычный /start без параметров
@@ -146,24 +151,41 @@ async def start_handler(message: types.Message, command: CommandObject, bot: Bot
         "welcome_default",
         "👋 <b>Добро пожаловать!</b>\n\nЭтот бот предназначен для скачивания плагинов и файлов по специальным ссылкам."
     )
-    await safe_answer(message, welcome_default)
+    reply_kb = user_admin_shortcut_kb() if user_id == ADMIN_ID else None
+    await show_or_edit(
+        bot=bot,
+        chat_id=message.chat.id,
+        user_id=user_id,
+        text=welcome_default,
+        reply_markup=reply_kb
+    )
 
-# 3. Дополнительный хэндлер: если пользователь просто отправил ссылку или код в чат текстом
+# 3. Обработчик текста: если пользователь отправил ссылку или код в чат текстом
 @router.message(F.text)
 async def text_link_catcher(message: types.Message, bot: Bot):
     text = (message.text or "").strip()
     if not text or text.startswith("/"):
         return
 
-    # Проверяем, содержит ли текст код ссылки или URL
+    await safe_delete_user_message(message)
+
     potential_code = text
     if "start=" in potential_code:
         potential_code = potential_code.split("start=")[-1].split("&")[0].strip()
     elif "t.me/" in potential_code:
         potential_code = potential_code.split("/")[-1].strip()
 
+    prev_msg_id = get_last_message_id(message.from_user.id)
+    if prev_msg_id:
+        await safe_delete_message(bot, message.chat.id, prev_msg_id)
+        clear_last_message_id(message.from_user.id)
+
     delivered = await deliver_file_by_link(message, potential_code, bot)
     if not delivered:
-        # Если это просто сообщение и не ссылка — ничего не отвечаем или даем приветствие
-        pass
-
+        not_found_msg = await db.get_text("link_not_found", "❌ Ссылка не найдена или устарела.")
+        await show_or_edit(
+            bot=bot,
+            chat_id=message.chat.id,
+            user_id=message.from_user.id,
+            text=not_found_msg
+        )
