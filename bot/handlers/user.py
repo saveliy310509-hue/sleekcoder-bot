@@ -1,5 +1,5 @@
 import html
-from aiogram import Router, Bot, types
+from aiogram import Router, Bot, types, F
 from aiogram.filters import CommandStart, CommandObject
 from bot.config import ADMIN_ID
 from bot.database import db
