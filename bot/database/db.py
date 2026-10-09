@@ -1,6 +1,7 @@
 import aiosqlite
 from typing import Optional, List, Dict, Any
 from bot.config import DB_PATH
+from bot.storage_sync import sync_on_startup, trigger_backup_save
 
 DEFAULT_TEXTS = [
     (
@@ -73,6 +74,9 @@ async def init_db():
 
         await db.commit()
 
+    # Автоматическое восстановление/синхронизация ссылок из облака/бэкапа
+    await sync_on_startup(DB_PATH)
+
 # --- Пользователи и статистика ---
 
 async def add_or_update_user(user_id: int, username: Optional[str], first_name: Optional[str]):
@@ -107,20 +111,59 @@ async def get_stats() -> Dict[str, int]:
 # --- Ссылки ---
 
 async def create_link(code: str, name: str, file_id: str, file_unique_id: Optional[str], file_type: str, caption: Optional[str] = None) -> int:
+    clean_code = (code or "").strip()
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute("""
             INSERT INTO links (code, name, file_id, file_unique_id, file_type, caption)
             VALUES (?, ?, ?, ?, ?, ?)
-        """, (code, name, file_id, file_unique_id, file_type, caption))
+        """, (clean_code, name, file_id, file_unique_id, file_type, caption))
         await db.commit()
-        return cursor.lastrowid
+        last_id = cursor.lastrowid
+
+    # Мгновенно сохраняем резервную копию локально и в облако GitHub
+    trigger_backup_save(DB_PATH)
+    return last_id
 
 async def get_link_by_code(code: str) -> Optional[Dict[str, Any]]:
+    if not code:
+        return None
+        
+    clean_code = code.strip()
+    # Извлечение чистого кода, если пользователь отправил ссылку
+    if "start=" in clean_code:
+        clean_code = clean_code.split("start=")[-1].split("&")[0].strip()
+    elif "t.me/" in clean_code:
+        clean_code = clean_code.split("/")[-1].strip()
+    clean_code = clean_code.replace(" ", "").replace("\n", "")
+
+    # 1. Поиск в SQLite базе данных (регистронезависимо)
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM links WHERE code = ?", (code,)) as cursor:
+        async with db.execute(
+            "SELECT * FROM links WHERE LOWER(TRIM(code)) = LOWER(TRIM(?))",
+            (clean_code,)
+        ) as cursor:
             row = await cursor.fetchone()
-            return dict(row) if row else None
+            if row:
+                return dict(row)
+
+    # 2. Защитный фоллбэк: если базы данных по какой-то причине нет в SQLite,
+    # мгновенно проверяем резервный файл data/links_backup.json!
+    try:
+        from bot.storage_sync import LOCAL_BACKUP_FILE, import_dict_to_db
+        if LOCAL_BACKUP_FILE.exists():
+            import json
+            with open(LOCAL_BACKUP_FILE, "r", encoding="utf-8") as f:
+                b_data = json.load(f)
+                for item in b_data.get("links", []):
+                    if item.get("code", "").lower().strip() == clean_code.lower():
+                        # Ссылка найдена в резервной копии — восстанавливаем её в SQLite!
+                        await import_dict_to_db(DB_PATH, {"links": [item]})
+                        return item
+    except Exception:
+        pass
+
+    return None
 
 async def get_link_by_id(link_id: int) -> Optional[Dict[str, Any]]:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -130,11 +173,12 @@ async def get_link_by_id(link_id: int) -> Optional[Dict[str, Any]]:
             return dict(row) if row else None
 
 async def increment_link_clicks(code: str) -> int:
+    clean_code = (code or "").strip()
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE links SET clicks = clicks + 1 WHERE code = ?", (code,))
+        await db.execute("UPDATE links SET clicks = clicks + 1 WHERE LOWER(TRIM(code)) = LOWER(TRIM(?))", (clean_code,))
         await db.commit()
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT clicks FROM links WHERE code = ?", (code,)) as cursor:
+        async with db.execute("SELECT clicks FROM links WHERE LOWER(TRIM(code)) = LOWER(TRIM(?))", (clean_code,)) as cursor:
             row = await cursor.fetchone()
             return row["clicks"] if row else 1
 
@@ -159,7 +203,11 @@ async def delete_link(link_id: int) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute("DELETE FROM links WHERE id = ?", (link_id,))
         await db.commit()
-        return cursor.rowcount > 0
+        deleted = cursor.rowcount > 0
+
+    if deleted:
+        trigger_backup_save(DB_PATH)
+    return deleted
 
 async def update_link_file(link_id: int, file_id: str, file_unique_id: Optional[str], file_type: str) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -169,7 +217,11 @@ async def update_link_file(link_id: int, file_id: str, file_unique_id: Optional[
             WHERE id = ?
         """, (file_id, file_unique_id, file_type, link_id))
         await db.commit()
-        return cursor.rowcount > 0
+        updated = cursor.rowcount > 0
+
+    if updated:
+        trigger_backup_save(DB_PATH)
+    return updated
 
 async def update_link_caption(link_id: int, caption: Optional[str]) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -179,7 +231,11 @@ async def update_link_caption(link_id: int, caption: Optional[str]) -> bool:
             WHERE id = ?
         """, (caption, link_id))
         await db.commit()
-        return cursor.rowcount > 0
+        updated = cursor.rowcount > 0
+
+    if updated:
+        trigger_backup_save(DB_PATH)
+    return updated
 
 async def update_link_name(link_id: int, name: str) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -189,7 +245,11 @@ async def update_link_name(link_id: int, name: str) -> bool:
             WHERE id = ?
         """, (name, link_id))
         await db.commit()
-        return cursor.rowcount > 0
+        updated = cursor.rowcount > 0
+
+    if updated:
+        trigger_backup_save(DB_PATH)
+    return updated
 
 # --- Тексты сообщений ---
 
@@ -213,7 +273,11 @@ async def update_text(key: str, value: str) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute("UPDATE bot_texts SET value = ? WHERE key = ?", (value, key))
         await db.commit()
-        return cursor.rowcount > 0
+        updated = cursor.rowcount > 0
+
+    if updated:
+        trigger_backup_save(DB_PATH)
+    return updated
 
 async def get_text_item(key: str) -> Optional[Dict[str, str]]:
     async with aiosqlite.connect(DB_PATH) as db:

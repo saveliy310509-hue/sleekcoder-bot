@@ -6,8 +6,17 @@ def admin_main_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="➕ Создать ссылку", callback_data="admin:create")],
         [InlineKeyboardButton(text="📋 Список ссылок", callback_data="admin:links:1")],
         [InlineKeyboardButton(text="✏️ Редактировать сообщения", callback_data="admin:texts")],
+        [InlineKeyboardButton(text="💾 Резервные копии и синхронизация", callback_data="admin:backup_menu")],
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")],
         [InlineKeyboardButton(text="❌ Закрыть панель", callback_data="admin:close")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def admin_backup_kb() -> InlineKeyboardMarkup:
+    keyboard = [
+        [InlineKeyboardButton(text="🔄 Синхронизировать сейчас", callback_data="admin:sync_now")],
+        [InlineKeyboardButton(text="📥 Отправить файл резервной копии", callback_data="admin:backup_download")],
+        [InlineKeyboardButton(text="🔙 В меню", callback_data="admin:menu")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 

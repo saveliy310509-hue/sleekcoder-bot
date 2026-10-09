@@ -73,9 +73,16 @@ async def health_handler(request):
     b2_status = reviews_bot_module.LAST_STATUS or BOT2_STATUS
     b2_error = reviews_bot_module.LAST_ERROR or BOT2_ERROR
 
+    links_cnt = 0
+    try:
+        links_cnt = await files_db.count_links()
+    except Exception:
+        pass
+
     body = (
         f"=== Bot 1 (@sleekcoder_bot - Files) ===\n"
         f"Status: {BOT1_STATUS}\n"
+        f"Active Links: {links_cnt}\n"
         f"Webhook: {wh1_info}\n"
         f"Error: {BOT1_ERROR}\n\n"
         f"=== Bot 2 (@sleekcodereviews_bot - Reviews) ===\n"
@@ -132,7 +139,9 @@ async def run_files_bot():
                     [
                         BotCommand(command="start", description="Запустить бота"),
                         BotCommand(command="admin", description="⚙️ Панель администратора"),
-                        BotCommand(command="create", description="➕ Создать ссылку на файл")
+                        BotCommand(command="create", description="➕ Создать ссылку на файл"),
+                        BotCommand(command="backup", description="💾 Резервная копия базы"),
+                        BotCommand(command="sync", description="🔄 Синхронизировать ссылки")
                     ],
                     scope=BotCommandScopeChat(chat_id=FILES_ADMIN_ID)
                 )

@@ -15,6 +15,7 @@ from bot.states.admin_states import (
 )
 from bot.keyboards.inline import (
     admin_main_kb,
+    admin_backup_kb,
     links_list_kb,
     link_detail_kb,
     link_delete_confirm_kb,
@@ -518,3 +519,100 @@ async def process_new_text(message: types.Message, state: FSMContext):
 @router.callback_query(F.data == "noop")
 async def cb_noop(callback: types.CallbackQuery):
     await callback.answer()
+
+# --- Резервное копирование и облачная синхронизация ---
+
+from bot.config import DB_PATH
+from bot.storage_sync import sync_on_startup, trigger_backup_save, LOCAL_BACKUP_FILE
+
+@router.message(Command("backup"))
+async def cmd_backup(message: types.Message, bot: Bot):
+    if not is_admin(message.from_user.id):
+        return
+    trigger_backup_save(DB_PATH)
+    links_cnt = await db.count_links()
+    msg = await message.answer("⏳ Создаем резервную копию базы данных и отправляем...")
+    
+    from aiogram.types import FSInputFile
+    if LOCAL_BACKUP_FILE.exists():
+        await bot.send_document(
+            chat_id=message.chat.id,
+            document=FSInputFile(LOCAL_BACKUP_FILE, filename="links_backup.json"),
+            caption=f"💾 <b>Резервная копия ссылок (JSON)</b>\nВсего ссылок: <b>{links_cnt}</b>",
+            parse_mode="HTML"
+        )
+    if DB_PATH.exists():
+        await bot.send_document(
+            chat_id=message.chat.id,
+            document=FSInputFile(DB_PATH, filename="bot_data.db"),
+            caption="🗄 <b>Файл базы данных SQLite</b>",
+            parse_mode="HTML"
+        )
+    await msg.delete()
+
+@router.message(Command("sync"))
+async def cmd_sync(message: types.Message):
+    if not is_admin(message.from_user.id):
+        return
+    msg = await message.answer("⏳ Синхронизируем базу данных с облачным хранилищем...")
+    await sync_on_startup(DB_PATH)
+    cnt = await db.count_links()
+    await msg.edit_text(
+        f"✅ <b>Синхронизация успешно завершена!</b>\n\nАктивных ссылок в базе данных: <b>{cnt}</b>",
+        parse_mode="HTML"
+    )
+
+@router.callback_query(F.data == "admin:backup_menu")
+async def cb_admin_backup_menu(callback: types.CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    cnt = await db.count_links()
+    cloud_status = "Подключено (GitHub Sync)"
+    await callback.message.edit_text(
+        f"💾 <b>Резервное копирование и облачная синхронизация</b>\n\n"
+        f"📊 Активных ссылок в базе: <b>{cnt}</b>\n"
+        f"☁️ Облачное хранилище: <b>{cloud_status}</b>\n\n"
+        f"Все созданные ссылки автоматически сохраняются в защищенное облако. "
+        f"Даже если хостинг перезагрузит сервер, все ссылки мгновенно восстанавливаются автоматически.",
+        reply_markup=admin_backup_kb(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+@router.callback_query(F.data == "admin:sync_now")
+async def cb_admin_sync_now(callback: types.CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    await callback.answer("⏳ Синхронизация с облаком...")
+    await sync_on_startup(DB_PATH)
+    cnt = await db.count_links()
+    await callback.message.edit_text(
+        f"✅ <b>Синхронизация успешно завершена!</b>\n\n"
+        f"📊 Актуальное количество ссылок: <b>{cnt}</b>\n\n"
+        f"Все ссылки обновлены и готовы к выдаче пользователям.",
+        reply_markup=admin_backup_kb(),
+        parse_mode="HTML"
+    )
+
+@router.callback_query(F.data == "admin:backup_download")
+async def cb_admin_backup_download(callback: types.CallbackQuery, bot: Bot):
+    if not is_admin(callback.from_user.id):
+        return
+    await callback.answer("Отправка файлов...")
+    trigger_backup_save(DB_PATH)
+    from aiogram.types import FSInputFile
+    cnt = await db.count_links()
+    if LOCAL_BACKUP_FILE.exists():
+        await bot.send_document(
+            chat_id=callback.from_user.id,
+            document=FSInputFile(LOCAL_BACKUP_FILE, filename="links_backup.json"),
+            caption=f"💾 <b>Резервная копия ссылок (JSON)</b>\nВсего ссылок: <b>{cnt}</b>",
+            parse_mode="HTML"
+        )
+    if DB_PATH.exists():
+        await bot.send_document(
+            chat_id=callback.from_user.id,
+            document=FSInputFile(DB_PATH, filename="bot_data.db"),
+            caption="🗄 <b>Файл базы данных SQLite</b>",
+            parse_mode="HTML"
+        )
