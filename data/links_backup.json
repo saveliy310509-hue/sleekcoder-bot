@@ -1,3 +1,43 @@
 {
-  "test": "ok"
+  "version": 1,
+  "links": [
+    {
+      "id": 1,
+      "code": "6vuFR9Zm",
+      "name": "SleekClans",
+      "file_id": "BQACAgEAAxkBAAMIaq_LqMtuNQwzdo-ARZtx9sCLUg0AAtwHAALoAYBF-yoOGgEn_IE9BA",
+      "file_unique_id": "AgAD3AcAAugBgEU",
+      "file_type": "document",
+      "caption": null,
+      "clicks": 4,
+      "created_at": "2026-09-20 12:03:53"
+    }
+  ],
+  "texts": [
+    {
+      "key": "admin_welcome",
+      "title": "Приветствие администратора",
+      "value": "<tg-emoji emoji-id=\"5377339831011529535\">👑</tg-emoji> Привет администратор!\n\n<tg-emoji emoji-id=\"5379708917792129989\">👻</tg-emoji> Здесь вы можете управлять ссылками, настраивать сообщения и смотреть статистику."
+    },
+    {
+      "key": "file_caption_default",
+      "title": "Стандартная подпись к файлу",
+      "value": "<tg-emoji emoji-id=\"5377820863053710664\">🎁</tg-emoji> Плагин — {name}\n\n<tg-emoji emoji-id=\"5377670556378219335\">👁</tg-emoji> Скачиваний: {downloads}\n<i>Ваш файл готов к скачиванию!</i>"
+    },
+    {
+      "key": "file_delivery_text",
+      "title": "Сообщение перед отправкой файла",
+      "value": "<tg-emoji emoji-id=\"5467898108346140145\">💲</tg-emoji> Отправляем файл..."
+    },
+    {
+      "key": "link_not_found",
+      "title": "Ошибка: ссылка не найдена",
+      "value": "<tg-emoji emoji-id=\"5377619600886219032\">❌</tg-emoji> Ошибка!\n\n<tg-emoji emoji-id=\"5314262274855163251\">💬</tg-emoji> Ссылка не найдена или устарела.\n<i>За помощью обратитесь к менеджеру ↷\n</i><i>@sleekmanager</i>"
+    },
+    {
+      "key": "welcome_default",
+      "title": "Приветствие пользователя (/start без ссылки)",
+      "value": "<tg-emoji emoji-id=\"5377701149430272406\">✋</tg-emoji> Добро пожаловать!\n\n<tg-emoji emoji-id=\"5377670556378219335\">👁</tg-emoji> Этот бот предназначен для скачивания наших продуктов!"
+    }
+  ]
 }
