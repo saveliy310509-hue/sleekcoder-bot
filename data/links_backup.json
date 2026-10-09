@@ -1,18 +1,6 @@
 {
   "version": 1,
-  "links": [
-    {
-      "id": 1,
-      "code": "6vuFR9Zm",
-      "name": "SleekClans",
-      "file_id": "BQACAgEAAxkBAAMIaq_LqMtuNQwzdo-ARZtx9sCLUg0AAtwHAALoAYBF-yoOGgEn_IE9BA",
-      "file_unique_id": "AgAD3AcAAugBgEU",
-      "file_type": "document",
-      "caption": null,
-      "clicks": 4,
-      "created_at": "2026-09-20 12:03:53"
-    }
-  ],
+  "links": [],
   "texts": [
     {
       "key": "admin_welcome",
